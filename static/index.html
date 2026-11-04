@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#2B313B">
+<title>Фасад В14 — выполнение работ</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='4' fill='%23212830'/%3E%3Cpath d='M16 5v22M5 16h22' stroke='%23E8EAED' stroke-width='1.6'/%3E%3Crect x='12.5' y='12.5' width='7' height='7' fill='none' stroke='%23E8EAED' stroke-width='1.6'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="ribbon">
+  <div class="app-name">Фасад В14</div>
+  <div class="rb-group" id="paintTools">
+    <button class="rb-btn active" id="brushBtn" onclick="setTool('brush')" title="Кисть (B)">
+      <svg viewBox="0 0 20 20"><path d="M13.5 3.5l3 3-7.5 7.5-3-3z M6 11l3 3-1.2 1.2C6.6 16.4 4.5 16.8 3 17c.2-1.5.6-3.6 1.8-4.8z"/></svg>Кисть</button>
+    <button class="rb-btn" id="eraserBtn" onclick="setTool('eraser')" title="Ластик (E)">
+      <svg viewBox="0 0 20 20"><path d="M3 13l8-8 6 6-6 6H7z M7 9l6 6"/></svg>Ластик</button>
+    <label class="rb-size" title="Размер кисти">
+      <span class="brush-dot" id="brushDot"></span>
+      <input type="range" id="brushRange" min="1" max="40" value="10" oninput="onBrushSize(this.value)">
+    </label>
+    <button class="rb-btn danger" onclick="clearLayer()" title="Снять всю закраску текущего вида работ на корпусе">
+      <svg viewBox="0 0 20 20"><path d="M5 6h10M8 6V4h4v2M6.5 6l.8 10h5.4l.8-10"/></svg>Очистить слой</button>
+  </div>
+  <div class="rb-group">
+    <button class="rb-btn" onclick="resetView()" title="Показать весь корпус (Z)">
+      <svg viewBox="0 0 20 20"><path d="M3 7V3h4M13 3h4v4M17 13v4h-4M7 17H3v-4"/></svg>Показать всё</button>
+  </div>
+  <div class="rb-right">
+    <span class="view-only-badge" id="viewOnlyBadge">Только просмотр</span>
+    <button class="lock-chip" id="lockChip" onclick="askEditPassword()">Войти для редактирования</button>
+    <span class="status-chip" id="syncStatus" title="Данные хранятся на сервере и общие для всех">
+      <span class="status-dot" id="syncDot"></span><span id="syncStatusText">Подключение…</span>
+    </span>
+  </div>
+</header>
+
+<main id="canvas-wrap">
+  <canvas id="cv"></canvas>
+</main>
+
+<aside class="palette pal-left" id="layerPal">
+  <div class="pal-head" onclick="togglePal('layerPal')"><span>Виды работ</span><span class="pal-sub" id="layerSub"></span><span class="chev">▾</span></div>
+  <div class="pal-body" id="workTypeList"></div>
+</aside>
+
+<aside class="palette pal-right" id="volCard">
+  <div class="pal-head" onclick="toggleVolCard()"><span>Объёмы по осям</span><span class="pal-sub" id="volWt"></span><span class="chev">▾</span></div>
+  <div class="pal-body" id="volBody"></div>
+</aside>
+
+<footer class="statusbar">
+  <nav class="layout-tabs" id="corpusTabs">
+    <button class="corpus-tab active" data-corpus="corpus1" onclick="switchCorpus('corpus1')">Корпус 1</button>
+    <button class="corpus-tab" data-corpus="corpus2" onclick="switchCorpus('corpus2')">Корпус 2</button>
+    <button class="corpus-tab" data-corpus="corpus3" onclick="switchCorpus('corpus3')">Корпус 3</button>
+    <button class="corpus-tab" data-corpus="corpus4" onclick="switchCorpus('corpus4')">Корпус 4</button>
+    <button class="corpus-tab" data-corpus="corpus5" onclick="switchCorpus('corpus5')">Корпус 5</button>
+  </nav>
+  <div class="sb-coords" id="coordReadout"></div>
+  <div class="sb-hint" id="zoomHint"></div>
+</footer>
+
+<div class="loading-veil" id="loadingVeil"><span class="spin"></span><span id="loadingText">Загружаю корпус…</span></div>
+<div class="empty-corpus-msg" id="emptyCorpusMsg" style="display:none">Для этого корпуса нет геометрии</div>
+
+<div class="ks-card" id="ksCard" style="display:none">
+  <div class="pal-head"><span>Участки КС</span></div>
+  <button class="ks-new-btn" id="ksNewBtn" onclick="toggleKsMode()">+ Выделить участок</button>
+  <div id="ksList"></div>
+  <div id="ksStats"></div>
+</div>
+
+<input type="color" id="colorPickerInput" style="position:fixed;left:-999px;top:-999px;width:1px;height:1px;opacity:0;">
+
+<script src="app.js"></script>
+</body>
+</html>
