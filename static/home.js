@@ -117,6 +117,13 @@ async function loadUsers(){
       tr.append(el('td', null, s));
     });
     tr.append(el('td', { class:'acts' },
+      el('button', { class:'ghost sm', type:'button', text:'Логин', onclick: async () => {
+        const nl = prompt('Новый логин для ' + u.login + ' (латиница, цифры, . _ - @):', u.login);
+        if (!nl || nl.trim() === u.login) return;
+        try { await api('/api/admin/users/' + u.id, { method:'POST', body:{ login:nl.trim() } }); } catch(e){ alert(e.message); return; }
+        if (me){ ME.user.login = nl.trim(); }
+        loadUsers();
+      } }),
       el('button', { class:'ghost sm', type:'button', text:'Пароль', onclick:() => openReset(u) }),
       me ? null : el('button', { class:'ghost sm', type:'button', text: u.active ? 'Отключить' : 'Включить',
         onclick: async () => {

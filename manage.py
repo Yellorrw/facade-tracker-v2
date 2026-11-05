@@ -5,6 +5,7 @@
   python3 manage.py passwd ЛОГИН         — задать новый пароль (если забыли)
   python3 manage.py list                 — список пользователей и доступов
   python3 manage.py disable ЛОГИН        — отключить пользователя
+  python3 manage.py rename СТАРЫЙ НОВЫЙ   — сменить логин (пароль и доступы сохраняются)
 """
 import getpass, os, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -37,6 +38,15 @@ def main():
             c.execute("UPDATE users SET pw=?, pw_changed=?, active=1 WHERE id=?", (S.hash_password(ask_password()), int(time.time()), r["id"]))
             c.execute("DELETE FROM sessions WHERE user_id=?", (r["id"],))
             print("Пароль обновлён, все входы этого пользователя сброшены.")
+        elif cmd == "rename":
+            new = sys.argv[3] if len(sys.argv) > 3 else ""
+            if not S.LOGIN_RE.match(new): sys.exit("Новый логин: 3–40 символов, латиница, цифры, . _ - @")
+            r = c.execute("SELECT id, login FROM users WHERE login=?", (arg,)).fetchone()
+            if not r: sys.exit("Нет пользователя " + arg)
+            if c.execute("SELECT 1 FROM users WHERE login=? AND id<>?", (new, r["id"])).fetchone(): sys.exit("Логин " + new + " уже занят")
+            c.execute("UPDATE users SET login=? WHERE id=?", (new, r["id"]))
+            c.execute("UPDATE events SET user=? WHERE user=?", (new, r["login"]))
+            print("Логин изменён: %s → %s. Пароль и доступы прежние." % (r["login"], new))
         elif cmd == "disable":
             n = c.execute("UPDATE users SET active=0 WHERE login=?", (arg,)).rowcount
             c.execute("DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE login=?)", (arg,))

@@ -505,6 +505,13 @@ class H(BaseHTTPRequestHandler):
             with db() as c:
                 if not c.execute("SELECT 1 FROM users WHERE id=?", (uid,)).fetchone(): raise ApiError(404, "Нет пользователя")
                 if "name" in d: c.execute("UPDATE users SET name=? WHERE id=?", (str(d["name"])[:80], uid))
+                if "login" in d:
+                    nl = str(d["login"]).strip()
+                    if not LOGIN_RE.match(nl): raise ApiError(400, "Логин: 3–40 символов, латиница, цифры, . _ - @")
+                    old = c.execute("SELECT login FROM users WHERE id=?", (uid,)).fetchone()["login"]
+                    if c.execute("SELECT 1 FROM users WHERE login=? AND id<>?", (nl, uid)).fetchone(): raise ApiError(400, "Такой логин уже есть")
+                    c.execute("UPDATE users SET login=? WHERE id=?", (nl, uid))
+                    c.execute("UPDATE events SET user=? WHERE user=?", (nl, old))
                 if "password" in d:
                     err = check_new_password(d["password"])
                     if err: raise ApiError(400, err)
