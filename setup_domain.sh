@@ -7,7 +7,7 @@
 # Запуск:  bash ~/facade-tracker-v2/setup_domain.sh facade-pto.online
 #
 # Что делает:
-#   • ставит Caddy — он сам получает и продлевает бесплатный сертификат Let's Encrypt;
+#   • скачивает Caddy (официальная сборка, проверка SHA-512) — он сам получает и продлевает сертификат Let's Encrypt;
 #   • добавляет правило фильтра macOS (pf): ответы посетителям сайта уходят обратно через домашний
 #     интернет, а не через VPN (иначе при включённом VPN сайт снаружи не открывается). Остальной
 #     трафик мака по-прежнему идёт через VPN. Правило включается само после перезагрузки.
@@ -30,15 +30,28 @@ LANIP="$(ipconfig getifaddr "$IFACE")"
 [ -n "$GW" ] || { echo "Не нашёл адрес роутера для $IFACE."; exit 1; }
 echo "Домашняя сеть: $IFACE, адрес мака $LANIP, роутер $GW"
 
-# ── 2. Caddy ──
-if ! command -v caddy >/dev/null; then
-  if command -v brew >/dev/null; then brew install caddy
-  else echo "Нужен Homebrew: откройте https://brew.sh, выполните команду установки оттуда и запустите этот скрипт ещё раз."; exit 1; fi
+# ── 2. Caddy — скачиваем официальную сборку с GitHub и сверяем контрольную сумму (Homebrew не нужен) ──
+CADDY_VER=2.11.9
+case "$(uname -m)" in
+  x86_64) ARCH=amd64; SUM=c36155058098d916a2f3049be3ade6ccb0a1cb0cf3cb50ee8806ea67d5249e567cf053024a5a4d2d50df5ec338c84c52aae1dfb147dfc62cabe1574a36d39282 ;;
+  arm64)  ARCH=arm64; SUM=166a8fdd183dc597ebe3a12d71e2e8eb313ab673ae8d3e286cb92bb0078d04233c23347543f7d7e8285b44136416e6718b0d106afe973de8ede4d81b6809c6bb ;;
+  *) echo "Неизвестная архитектура $(uname -m)"; exit 1 ;;
+esac
+APP="$(pwd)"; BIN="$APP/data/bin"; CADDY="$BIN/caddy"; CDATA="$APP/data/caddy"
+mkdir -p "$BIN" "$CDATA"
+if [ ! -x "$CADDY" ] || ! "$CADDY" version 2>/dev/null | grep -q "v$CADDY_VER"; then
+  TGZ="$BIN/caddy.tar.gz"
+  echo "Скачиваю Caddy $CADDY_VER ($ARCH)…"
+  curl -fL --retry 3 -o "$TGZ" "https://github.com/caddyserver/caddy/releases/download/v$CADDY_VER/caddy_${CADDY_VER}_mac_${ARCH}.tar.gz"
+  echo "$SUM  $TGZ" | shasum -a 512 -c - >/dev/null || { echo "Контрольная сумма не совпала — файл повреждён или подменён, останавливаюсь."; rm -f "$TGZ"; exit 1; }
+  tar -xzf "$TGZ" -C "$BIN" caddy && rm -f "$TGZ" && chmod 755 "$CADDY"
 fi
-CADDYFILE="$(brew --prefix)/etc/Caddyfile"
+"$CADDY" version
+CADDYFILE="$CDATA/Caddyfile"
 cat > "$CADDYFILE" <<CF
 {
 	email admin@$DOMAIN
+	admin off
 }
 $DOMAIN {
 	encode zstd gzip
@@ -48,7 +61,7 @@ $DOMAIN {
 	reverse_proxy 127.0.0.1:$PORT
 	header -Server
 	log {
-		output file $(pwd)/logs/caddy.log {
+		output file $APP/logs/caddy.log {
 			roll_size 10MiB
 			roll_keep 5
 		}
@@ -58,7 +71,7 @@ www.$DOMAIN {
 	redir https://$DOMAIN{uri} permanent
 }
 CF
-caddy validate --config "$CADDYFILE" --adapter caddyfile >/dev/null
+"$CADDY" validate --config "$CADDYFILE" --adapter caddyfile >/dev/null 2>&1 || "$CADDY" validate --config "$CADDYFILE" --adapter caddyfile
 echo "Caddyfile: $CADDYFILE"
 
 # ── 3. правило pf: ответы на входящие 80/443 — через домашний интернет, мимо VPN ──
@@ -85,8 +98,28 @@ sudo /sbin/pfctl -a com.apple/ru.fasady -f "$ANCHOR"
 sudo launchctl bootstrap system "$PFPLIST" 2>/dev/null || true
 echo "Правило pf загружено:"; sudo /sbin/pfctl -a com.apple/ru.fasady -s rules
 
-# ── 4. запуск Caddy службой (работает без входа в систему) ──
-sudo brew services restart caddy
+# ── 4. Caddy службой: стартует сам при включении мака, без входа в систему ──
+CPLIST=/Library/LaunchDaemons/ru.fasady.caddy.plist
+sudo tee "$CPLIST" >/dev/null <<PL
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>ru.fasady.caddy</string>
+  <key>ProgramArguments</key><array><string>$CADDY</string><string>run</string><string>--config</string><string>$CADDYFILE</string><string>--adapter</string><string>caddyfile</string></array>
+  <key>EnvironmentVariables</key><dict>
+    <key>XDG_DATA_HOME</key><string>$CDATA</string>
+    <key>XDG_CONFIG_HOME</key><string>$CDATA</string>
+    <key>HOME</key><string>$CDATA</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>$APP/logs/caddy-service.log</string>
+  <key>StandardErrorPath</key><string>$APP/logs/caddy-service.log</string>
+</dict></plist>
+PL
+sudo chmod 644 "$CPLIST"
+sudo launchctl bootout system "$CPLIST" 2>/dev/null || true
+sudo launchctl bootstrap system "$CPLIST"
 echo
 echo "Жду сертификат (до минуты)…"
 for i in $(seq 1 12); do
@@ -95,4 +128,4 @@ for i in $(seq 1 12); do
 done
 echo "Пока не открылось изнутри. Это бывает, если роутер не умеет открывать свой внешний адрес из домашней сети."
 echo "Проверьте с телефона через мобильный интернет: https://$DOMAIN"
-echo "Если не открывается и там — пришлите последние строки:  tail -30 $(pwd)/logs/caddy.log"
+echo "Если не открывается и там — пришлите последние строки:  tail -30 $(pwd)/logs/caddy-service.log"
