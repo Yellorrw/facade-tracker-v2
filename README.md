@@ -63,4 +63,4 @@ python3 ~/facade-tracker-v2/manage.py list              # кто есть и к�
 
 ## Домен
 
-`./setup_domain.sh домен.ru` ставит Caddy с сертификатом Let's Encrypt. Порядок подготовки описан в начале скрипта.
+`bash ~/facade-tracker-v2/setup_domain.sh facade-pto.online` — ставит Caddy (сертификат Let's Encrypt продлевается сам) и правило фильтра macOS, чтобы сайт открывался снаружи при включённом VPN. До запуска: A-запись домена → белый IP, на роутере порты 80 и 443 → Mac mini, за маком закреплён постоянный адрес в сети.
