@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#2B313B">
+<meta name="referrer" content="no-referrer">
+<title>Фасады</title>
+<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+
+<header class="ribbon">
+  <a class="app-name" href="/" title="Все объекты"><span class="back">‹</span><span id="projName">Фасады</span></a>
+  <div class="rb-group" id="paintTools">
+    <button class="rb-btn active" id="brushBtn" data-act="brush" title="Кисть (B)">
+      <svg viewBox="0 0 20 20"><path d="M13.5 3.5l3 3-7.5 7.5-3-3z M6 11l3 3-1.2 1.2C6.6 16.4 4.5 16.8 3 17c.2-1.5.6-3.6 1.8-4.8z"/></svg><span class="lbl">Кисть</span></button>
+    <button class="rb-btn" id="eraserBtn" data-act="eraser" title="Ластик (E)">
+      <svg viewBox="0 0 20 20"><path d="M3 13l8-8 6 6-6 6H7z M7 9l6 6"/></svg><span class="lbl">Ластик</span></button>
+    <label class="rb-size" title="Размер кисти">
+      <span class="brush-dot" id="brushDot"></span>
+      <input type="range" id="brushRange" min="1" max="40" value="10">
+    </label>
+    <button class="rb-btn danger" data-act="clear" title="Снять всю закраску текущего вида работ на корпусе">
+      <svg viewBox="0 0 20 20"><path d="M5 6h10M8 6V4h4v2M6.5 6l.8 10h5.4l.8-10"/></svg><span class="lbl">Очистить слой</span></button>
+  </div>
+  <div class="rb-group">
+    <button class="rb-btn" data-act="fit" title="Показать весь корпус (Z)">
+      <svg viewBox="0 0 20 20"><path d="M3 7V3h4M13 3h4v4M17 13v4h-4M7 17H3v-4"/></svg><span class="lbl">Показать всё</span></button>
+  </div>
+  <div class="rb-right">
+    <span class="view-only-badge" id="viewOnlyBadge">Только просмотр</span>
+    <span class="status-chip" id="syncStatus" title="Данные хранятся на сервере и общие для всех">
+      <span class="status-dot" id="syncDot"></span><span id="syncStatusText">Подключение…</span>
+    </span>
+    <span class="user-chip" id="userChip"></span>
+  </div>
+</header>
+
+<main id="canvas-wrap">
+  <canvas id="cv"></canvas>
+</main>
+
+<aside class="palette pal-left" id="layerPal">
+  <div class="pal-head" data-act="toggle-layers"><span>Виды работ</span><span class="pal-sub" id="layerSub"></span><span class="chev">▾</span></div>
+  <div class="pal-body" id="workTypeList"></div>
+</aside>
+
+<aside class="palette pal-right" id="volCard">
+  <div class="pal-head" data-act="toggle-vol"><span>Объёмы по осям</span><span class="pal-sub" id="volWt"></span><span class="chev">▾</span></div>
+  <div class="pal-body" id="volBody"></div>
+</aside>
+
+<footer class="statusbar">
+  <nav class="layout-tabs" id="corpusTabs"></nav>
+  <div class="sb-coords" id="coordReadout"></div>
+  <div class="sb-hint" id="zoomHint"></div>
+</footer>
+
+<div class="loading-veil" id="loadingVeil"><span class="spin"></span><span id="loadingText">Загружаю…</span></div>
+<div class="empty-corpus-msg" id="emptyCorpusMsg" hidden>Для этого корпуса нет геометрии</div>
+
+<div class="ks-card" id="ksCard" hidden>
+  <div class="pal-head"><span>Участки КС</span></div>
+  <button class="ks-new-btn" id="ksNewBtn" data-act="ks-new">+ Выделить участок</button>
+  <div id="ksList"></div>
+  <div id="ksStats"></div>
+</div>
+
+<script src="/assets/app.js"></script>
+</body>
+</html>

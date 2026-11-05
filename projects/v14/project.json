@@ -1,0 +1,20 @@
+{
+  "slug": "v14",
+  "name": "ЖК «СберСити», квартал В14",
+  "short": "В14",
+  "description": "Навесные вентилируемые фасады, корпуса 1–5",
+  "corpora": [
+    {"id": "corpus1", "label": "Корпус 1"},
+    {"id": "corpus2", "label": "Корпус 2"},
+    {"id": "corpus3", "label": "Корпус 3"},
+    {"id": "corpus4", "label": "Корпус 4"},
+    {"id": "corpus5", "label": "Корпус 5"}
+  ],
+  "hiddenWorkTypes": {
+    "corpus1": ["sfb", "keramogranit"],
+    "corpus2": ["sfb", "keramogranit"],
+    "corpus3": ["terracotta"],
+    "corpus4": ["terracotta"],
+    "corpus5": ["terracotta", "sfb", "keramogranit"]
+  }
+}

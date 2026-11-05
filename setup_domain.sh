@@ -25,8 +25,11 @@ CADDYFILE="$(brew --prefix)/etc/Caddyfile"
 cat > "$CADDYFILE" <<CF
 $DOMAIN {
 	encode zstd gzip
+	request_body {
+		max_size 2MB
+	}
 	reverse_proxy 127.0.0.1:$PORT
-	header Strict-Transport-Security "max-age=31536000"
+	header -Server
 	log {
 		output file $(pwd)/logs/caddy.log
 	}
@@ -39,5 +42,5 @@ sudo brew services restart caddy
 sleep 5
 echo
 echo "Проверка: https://$DOMAIN"
-curl -fsS -o /dev/null -w "HTTP %{http_code}\n" "https://$DOMAIN/api/config" \
+curl -fsS -o /dev/null -w "HTTP %{http_code}\n" "https://$DOMAIN/" \
   || echo "Пока не открывается. Проверьте проброс портов 80/443 на роутере и A-запись; логи: logs/caddy.log"

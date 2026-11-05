@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#2B313B">
+<meta name="referrer" content="no-referrer">
+<title>Фасады</title>
+<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/assets/home.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><img src="/assets/favicon.svg" alt="" width="22" height="22"><span>Фасады</span></div>
+  <div class="who" id="who" hidden>
+    <span id="whoName"></span>
+    <button class="link" id="pwBtn" type="button">Сменить пароль</button>
+    <button class="link" id="logoutBtn" type="button">Выйти</button>
+  </div>
+</header>
+
+<main>
+  <!-- вход -->
+  <section class="card login" id="loginView" hidden>
+    <h1>Вход</h1>
+    <p class="muted">Учёт выполнения фасадных работ по объектам</p>
+    <form id="loginForm" autocomplete="on">
+      <label>Логин<input name="login" id="loginInput" autocomplete="username" required maxlength="40" autocapitalize="none" spellcheck="false"></label>
+      <label>Пароль<input name="password" type="password" autocomplete="current-password" required maxlength="200"></label>
+      <div class="err" id="loginErr" role="alert"></div>
+      <button class="primary" type="submit">Войти</button>
+    </form>
+    <p class="muted small">Учётную запись выдаёт администратор.</p>
+  </section>
+
+  <!-- объекты -->
+  <section id="projectsView" hidden>
+    <h1>Объекты</h1>
+    <div class="grid" id="projectList"></div>
+    <p class="muted" id="noProjects" hidden>У вас пока нет доступа ни к одному объекту — обратитесь к администратору.</p>
+  </section>
+
+  <!-- пользователи (администратор) -->
+  <section id="adminView" hidden>
+    <h2>Пользователи</h2>
+    <div class="card">
+      <table class="users" id="userTable"></table>
+    </div>
+    <details class="card add">
+      <summary>Добавить пользователя</summary>
+      <form id="addUserForm" autocomplete="off">
+        <div class="row">
+          <label>Логин<input name="login" required maxlength="40" autocapitalize="none" spellcheck="false" placeholder="ivanov"></label>
+          <label>Имя<input name="name" maxlength="80" placeholder="Иванов И.И., прораб"></label>
+        </div>
+        <div class="row">
+          <label>Временный пароль<input name="password" required minlength="8" maxlength="200" autocomplete="new-password"></label>
+          <button class="ghost" type="button" id="genPw">Придумать</button>
+        </div>
+        <div class="row" id="addAccess"></div>
+        <label class="check"><input type="checkbox" name="admin"> Администратор (видит все объекты и управляет пользователями)</label>
+        <div class="err" id="addErr" role="alert"></div>
+        <button class="primary" type="submit">Создать</button>
+      </form>
+    </details>
+    <p class="muted small">Роли на объекте: <b>редактор</b> — отмечает выполненное, <b>наблюдатель</b> — только смотрит.</p>
+  </section>
+</main>
+
+<footer class="foot">Powered by Nikita Parshin</footer>
+
+<dialog id="pwDialog">
+  <form id="pwForm" method="dialog">
+    <h2>Смена пароля</h2>
+    <label>Текущий пароль<input name="old" type="password" autocomplete="current-password" required></label>
+    <label>Новый пароль<input name="new" type="password" autocomplete="new-password" required minlength="8"></label>
+    <label>Ещё раз<input name="new2" type="password" autocomplete="new-password" required minlength="8"></label>
+    <div class="err" id="pwErr" role="alert"></div>
+    <div class="actions"><button class="ghost" value="cancel" type="button" id="pwCancel">Отмена</button><button class="primary" type="submit">Сохранить</button></div>
+  </form>
+</dialog>
+
+<dialog id="resetDialog">
+  <form id="resetForm" method="dialog">
+    <h2 id="resetTitle">Новый пароль</h2>
+    <label>Новый пароль<input name="password" required minlength="8" autocomplete="new-password"></label>
+    <div class="err" id="resetErr" role="alert"></div>
+    <div class="actions"><button class="ghost" type="button" id="resetCancel">Отмена</button><button class="primary" type="submit">Сохранить</button></div>
+  </form>
+</dialog>
+
+<script src="/assets/home.js"></script>
+</body>
+</html>

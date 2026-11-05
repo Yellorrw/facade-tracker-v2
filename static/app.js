@@ -1,26 +1,31 @@
 /* ══════════════════════════════════════════════════════════════
-   ФАСАД В14 — закрашивание по видам работ, v2 (свой сервер).
-   Кистью «мажешь» по фасаду — закрашиваются целиком реальные панели
-   из DXF, которых коснулась кисть. На каждый вид работ — свой слой.
-   Геометрия корпуса грузится отдельным файлом data/corpusN.json только
-   при открытии корпуса. Закраска хранится на сервере журналом событий
-   (каждый мазок — одна запись), общая для всех устройств.
+   ФАСАДЫ — закрашивание выполненных работ по видам.
+   Кистью «мажешь» по фасаду — закрашиваются целиком элементы чертежа АР,
+   которых коснулась кисть: панели облицовки, окна (противопожарная отсечка),
+   откосы и отливы. На каждый вид работ — свой слой. Геометрия корпуса
+   грузится только при открытии и только после входа. Закраска хранится
+   на сервере журналом событий, общая для всех устройств.
 ══════════════════════════════════════════════════════════════ */
+'use strict';
 
 const WORK_TYPES = [
-  {id:'brackets',    label:'Монтаж кронштейнов', color:'#2E50E8', unit:'м²'},
-  {id:'insul1',      label:'Утеплитель 1 слой',  color:'#E68C26', unit:'м²'},
-  {id:'insul2',      label:'Утеплитель 2 слой',  color:'#C4650F', unit:'м²'},
-  {id:'rails',       label:'Монтаж направляющих',color:'#7A4FE0', unit:'м²'},
-  {id:'firecut',     label:'Противопожарная отсечка', color:'#D6455E', unit:'п.м'},
-  {id:'akp',         label:'Монтаж АКП',         color:'#0F8FA3', unit:'м²'},
-  {id:'sfb',         label:'СФБ',                color:'#8A6D3B', unit:'м²'},
-  {id:'keramogranit',label:'Керамогранит',       color:'#4C8C4A', unit:'м²'},
-  {id:'terracotta',  label:'Терракотовая плитка',color:'#BF2633', unit:'м²'},
-  {id:'reveals',     label:'Откосы',             color:'#59A6F2', unit:'п.м'},
-  {id:'flashings',   label:'Отливы',             color:'#D9C920', unit:'п.м'},
+  {id:'brackets',    label:'Монтаж кронштейнов', unit:'м²'},
+  {id:'insul1',      label:'Утеплитель 1 слой',  unit:'м²'},
+  {id:'insul2',      label:'Утеплитель 2 слой',  unit:'м²'},
+  {id:'rails',       label:'Монтаж направляющих',unit:'м²'},
+  {id:'fc_adj',      label:'Примыкание (4 стороны)', short:'Примыкание', group:'fc', unit:'п.м'},
+  {id:'fc_box',      label:'Короб (П-образный)',     short:'Короб',      group:'fc', unit:'п.м'},
+  {id:'fc_strip',    label:'Нащельники (2 стороны)', short:'Нащельники', group:'fc', unit:'п.м'},
+  {id:'akp',         label:'Монтаж АКП',         unit:'м²'},
+  {id:'sfb',         label:'СФБ',                unit:'м²'},
+  {id:'keramogranit',label:'Керамогранит',       unit:'м²'},
+  {id:'terracotta',  label:'Терракотовая плитка',unit:'м²'},
+  {id:'reveals',     label:'Откосы',             unit:'п.м'},
+  {id:'flashings',   label:'Отливы',             unit:'п.м'},
 ];
+const GROUPS = { fc:'Противопожарная отсечка' };
 const CLADDING = new Set(['akp','sfb','keramogranit','terracotta']); // проектный объём не считали — показываем м² по чертежу
+const LINEAR = new Set(['fc_adj','fc_box','fc_strip','reveals','flashings']);   // считаются в п.м по элементам чертежа
 let activeWorkType = WORK_TYPES[0].id;
 
 const LS = {
@@ -29,17 +34,27 @@ const LS = {
   del(k){ try { localStorage.removeItem(k); } catch(e){} },
 };
 
-/* ── режимы: «только просмотр» по ссылке (?view=1), на телефоне, или пока не введён пароль ── */
+/* ── режимы: «только просмотр» — у наблюдателя, на телефоне или по ссылке ?view=1 ── */
 const urlParams = new URLSearchParams(location.search);
 const FORCE_VIEW = urlParams.get('view') === '1' || urlParams.get('mode') === 'view';
 function isMobileViewport(){
   return window.innerWidth <= 820 || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
 }
-let NEED_PASSWORD = false;          // сервер требует пароль на редактирование
-let EDIT_TOKEN = LS.get('ft_edit_token', '');
-let TOKEN_OK = false;
-function computeReadOnly(){ return FORCE_VIEW || isMobileViewport() || (NEED_PASSWORD && !TOKEN_OK); }
-let READ_ONLY = computeReadOnly();
+const SLUG = (location.pathname.match(/^\/p\/([a-z0-9_-]{1,40})/) || [])[1] || '';
+const API = '/api/p/' + SLUG + '/';
+let PROJECT = null, ROLE = 'viewer';
+function computeReadOnly(){ return FORCE_VIEW || isMobileViewport() || ROLE !== 'editor'; }
+let READ_ONLY = true;
+
+/* все запросы — со своим заголовком (сервер так отличает страницы сайта от чужих), сессия — в cookie */
+async function apiFetch(path, opts){
+  opts = opts || {};
+  const init = { method: opts.method || 'GET', credentials:'same-origin', cache:'no-store', headers:{'X-Requested-With':'fasady'} };
+  if (opts.body !== undefined){ init.headers['Content-Type'] = 'application/json'; init.body = JSON.stringify(opts.body); }
+  const r = await fetch(API + path, init);
+  if (r.status === 401){ location.href = '/?next=' + encodeURIComponent(SLUG); throw new Error('Нужно войти'); }
+  return r;
+}
 
 function applyReadOnlyUI(){
   READ_ONLY = computeReadOnly();
@@ -52,8 +67,6 @@ function applyReadOnlyUI(){
   wrap.classList.toggle('readonly', READ_ONLY);
   const badge = document.getElementById('viewOnlyBadge');
   if (badge) badge.style.display = READ_ONLY ? 'inline-flex' : 'none';
-  const lock = document.getElementById('lockChip');
-  if (lock) lock.classList.toggle('show', NEED_PASSWORD && !TOKEN_OK && !FORCE_VIEW && !isMobileViewport());
   renderWorkTypeList();
 }
 window.addEventListener('resize', ()=>{
@@ -61,31 +74,14 @@ window.addEventListener('resize', ()=>{
   if (now !== READ_ONLY){ applyReadOnlyUI(); draw(); }
 });
 
-window.askEditPassword = async function(){
-  const val = prompt('Пароль на редактирование:', '');
-  if (val === null) return;
-  EDIT_TOKEN = val.trim();
-  TOKEN_OK = await checkToken();
-  if (TOKEN_OK){ LS.set('ft_edit_token', EDIT_TOKEN); flushOutbox(); }
-  else { LS.del('ft_edit_token'); alert('Неверный пароль'); }
-  applyReadOnlyUI(); draw();
-};
-async function checkToken(){
-  try {
-    const r = await fetch('api/check-token', {headers:{'X-Edit-Token': EDIT_TOKEN}});
-    return (await r.json()).ok === true;
-  } catch(e){ return false; }
-}
-
 const canvas = document.getElementById('cv');
 const ctx = canvas.getContext('2d');
 const wrap = document.getElementById('canvas-wrap');
 
 /* ── корпуса: геометрия грузится по требованию и кешируется в памяти ── */
-const CORPUS_LABEL = {corpus1:'Корпус 1', corpus2:'Корпус 2', corpus3:'Корпус 3', corpus4:'Корпус 4', corpus5:'Корпус 5'};
+let CORPUS_LABEL = {};      // из описания объекта
 const CORPUS = {};   // id -> {data, geo:{...}, layers, lastId, epoch, ksAreas}
-let activeCorpus = LS.get('ft_active_corpus', 'corpus1');
-if (!CORPUS_LABEL[activeCorpus]) activeCorpus = 'corpus1';
+let activeCorpus = null;
 let C = null;        // текущий корпус
 
 /* геометрия: панель = четырёхугольник; hidden — артефакт чертежа (спецификации, планы, выноски), не рисуется и не красится */
@@ -132,14 +128,14 @@ function buildIndex(geo){
 async function ensureCorpus(id){
   if (CORPUS[id]) return CORPUS[id];
   showLoading('Загружаю ' + CORPUS_LABEL[id] + '…');
-  const r = await fetch('data/' + id + '.json');
+  const r = await apiFetch('data/' + id + '.json');
   if (!r.ok) throw new Error('Не удалось загрузить геометрию ' + id);
   const d = await r.json();
   // подложка — чертёж АР (цвета слоёв и штриховки как в проекте)
   let ar = [];
   if (d.ar){
     try {
-      const rb = await fetch('data/' + id + '.ar.bin');
+      const rb = await apiFetch('data/' + id + '.ar.bin');
       if (rb.ok) ar = decodeAR(new Int32Array(await rb.arrayBuffer()), d.ar.groups);
     } catch(e){ console.warn('AR underlay failed', e); }
   }
@@ -148,10 +144,27 @@ async function ensureCorpus(id){
     sfb: buildGeoFlat(d.sfb, d.sfbFac), keramogranit: buildGeoFlat(d.keramogranit, d.keramogranitFac),
     brackets: buildGeoFlat(d.brackets, null, d.bracketsVis), rails: buildGeoFlat(d.rails, null, d.railsVis),
     monolith: buildGeoFlat(d.monolith, null, d.monolithVis), insulGrid: buildGeoFlat(d.insulGrid, null, d.insulGridVis),
+    windows: buildGeoFlat(d.windows, d.windowsFac), reveals: buildGeoFlat(d.reveals, d.revealsFac),
+    flashings: buildGeoFlat(d.flashings, d.flashingsFac),
+  };
+  // длины, п.м: окно 2×2 → примыкание 8, короб 6, нащельники 4; откос/отлив — длина элемента по проекту
+  geo.windows.forEach(g=>{ const w = (g.bx1-g.bx0)/1000, h = (g.by1-g.by0)/1000; g.len = {fc_adj:2*(w+h), fc_box:w+2*h, fc_strip:2*h}; });
+  for (const k of ['reveals','flashings']) geo[k].forEach((g, i)=>{ const L = ((d[k+'Len']||[])[i] || 0)/1000; g.len = {[k]:L}; g.mark = (d[k+'Mark']||[])[i] || ''; });
+  // контуры сторон окна, которые входят в каждый вид отсечки (для подсветки и закраски)
+  const sidesPath = (lst, which)=>{
+    const parts = [];
+    for (const g of lst){ if (g.hidden) continue;
+      const L = g.bx0, R = g.bx1, T = g.by0, B = g.by1;
+      if (which === 'fc_adj') parts.push('M'+L+' '+T+'L'+R+' '+T+'L'+R+' '+B+'L'+L+' '+B+'Z');
+      else if (which === 'fc_box') parts.push('M'+L+' '+B+'L'+L+' '+T+'L'+R+' '+T+'L'+R+' '+B);
+      else parts.push('M'+L+' '+T+'L'+L+' '+B+'M'+R+' '+T+'L'+R+' '+B);
+    }
+    return new Path2D(parts.join(''));
   };
   // статичные слои — один Path2D на слой (рисуется одним вызовом вместо тысяч)
   const paths = {}; for (const k in geo) paths[k] = buildPath(geo[k]);
-  const index = {}; for (const k of ['panel','akp','sfb','keramogranit']) index[k] = buildIndex(geo[k]);
+  const index = {}; for (const k of ['panel','akp','sfb','keramogranit','windows','reveals','flashings']) index[k] = buildIndex(geo[k]);
+  const sides = {}; for (const t of ['fc_adj','fc_box','fc_strip']) sides[t] = sidesPath(geo.windows, t);
   const ws = geo.panel.filter(g=>!g.hidden).map(g=>g.bx1-g.bx0).sort((a,b)=>a-b);
   const tileMm = ws.length ? ws[Math.floor(ws.length/2)] : 1000;
   const layers = {}, ver = {}; WORK_TYPES.forEach(w=>{ layers[w.id] = new Set(); ver[w.id] = 0; });
@@ -163,7 +176,7 @@ async function ensureCorpus(id){
     const pad = Math.max(maxX-minX, maxY-minY) * 0.03;
     fullBox = { x:minX-pad, y:minY-pad, w:(maxX-minX)+pad*2, h:(maxY-minY)+pad*2+3000 };
   } else fullBox = { x:-1000, y:-1000, w:2000, h:2000 };
-  CORPUS[id] = { id, data:d, ar, geo, paths, index, tileMm, layers, ver, fillCache:{}, lastId:0, epoch:null, ksAreas:[], fullBox };
+  CORPUS[id] = { id, data:d, ar, geo, paths, index, sides, sidesPath, tileMm, layers, ver, fillCache:{}, lastId:0, epoch:null, ksAreas:[], fullBox };
   return CORPUS[id];
 }
 function decodeAR(buf, groups){
@@ -191,8 +204,14 @@ function touchLayer(corp, id, addedIdx){
   if (addedIdx) e.add.push(...addedIdx); else e.all = true;
 }
 
-function geoKey(id){ return (id==='akp'||id==='sfb'||id==='keramogranit') ? id : 'panel'; }
-function geoForType(id){ return C.geo[geoKey(id)]; }   // все виды, кроме облицовки панелями, красятся по общей сетке
+function geoKey(id){
+  if (id==='akp'||id==='sfb'||id==='keramogranit'||id==='reveals'||id==='flashings') return id;
+  if (id==='fc_adj'||id==='fc_box'||id==='fc_strip') return 'windows';
+  return 'panel';                       // остальные виды красятся по общей сетке панелей фасада
+}
+function geoForType(id){ return C.geo[geoKey(id)]; }
+/* «вес» элемента в объёме: м² для панелей, п.м для окон, откосов и отливов */
+function measure(g, id){ return LINEAR.has(id) ? ((g.len && g.len[id]) || 0) : g.area; }
 
 /* ── камера ── */
 let viewCenterX=0, viewCenterY=0, viewWidth=1000;
@@ -220,8 +239,6 @@ function syncView(){
 }
 
 /* ══ синхронизация со своим сервером ══ */
-let CLIENT_ID = LS.get('dxf_client_id', '');
-if (!CLIENT_ID){ CLIENT_ID = Math.random().toString(36).slice(2) + Date.now().toString(36); LS.set('dxf_client_id', CLIENT_ID); }
 let syncBusy = false;
 function updateSyncStatus(text, ok){
   const dot = document.getElementById('syncDot'), label = document.getElementById('syncStatusText');
@@ -229,7 +246,6 @@ function updateSyncStatus(text, ok){
   label.textContent = text;
   dot.style.background = ok===false ? '#C0392B' : ok===true ? '#188A55' : '#B9B9B4';
 }
-function authHeaders(h){ h = h || {}; if (EDIT_TOKEN) h['X-Edit-Token'] = EDIT_TOKEN; return h; }
 
 function applyEvents(corp, events){
   events.forEach(ev=>{
@@ -244,7 +260,8 @@ async function pullEvents(){
   if (!C || syncBusy) return;
   const corp = C; syncBusy = true;
   try {
-    const r = await fetch('api/events?corpus=' + corp.id + '&after=' + corp.lastId, {cache:'no-store'});
+    const r = await apiFetch('events?corpus=' + corp.id + '&after=' + corp.lastId);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
     const d = await r.json();
     if (corp.epoch !== null && d.epoch !== corp.epoch){
       // журнал на сервере перестроен (например, импорт из Google) — перечитываем корпус целиком
@@ -256,6 +273,7 @@ async function pullEvents(){
     if (d.events && d.events.length){
       applyEvents(corp, d.events); corp.lastId = d.last;
       if (corp === C && !isDrawing){ renderWorkTypeList(); renderVolumes(); draw(); }
+      if (d.more){ syncBusy = false; return pullEvents(); }
     }
     updateSyncStatus(outbox.length ? 'Сохраняю… (' + outbox.length + ')' : 'Синхронизировано', true);
   } catch(e){
@@ -265,12 +283,12 @@ async function pullEvents(){
 
 /* очередь отправки: если сервер недоступен, мазки не теряются и уйдут позже */
 let outbox = [];
-try { outbox = JSON.parse(LS.get('ft_outbox', '[]')); } catch(e){ outbox = []; }
-function saveOutbox(){ LS.set('ft_outbox', JSON.stringify(outbox)); }
+const OUTBOX_KEY = 'ft_outbox_' + SLUG;
+try { outbox = JSON.parse(LS.get(OUTBOX_KEY, '[]')).filter(e=>e && e.project === SLUG); } catch(e){ outbox = []; }
+function saveOutbox(){ LS.set(OUTBOX_KEY, JSON.stringify(outbox)); }
 function pushEvent(workType, action, addArr, remArr){
-  outbox.push({ corpus: C.id, workType, action,
-    add: addArr ? Array.from(addArr) : [], remove: remArr ? Array.from(remArr) : [],
-    user: CLIENT_ID, ts: Date.now() });
+  outbox.push({ project: SLUG, corpus: C.id, workType, action,
+    add: addArr ? Array.from(addArr) : [], remove: remArr ? Array.from(remArr) : [] });
   saveOutbox(); flushOutbox();
 }
 let flushing = false;
@@ -280,8 +298,9 @@ async function flushOutbox(){
   try {
     while (outbox.length){
       const ev = outbox[0];
-      const r = await fetch('api/events', { method:'POST', headers: authHeaders({'Content-Type':'application/json'}), body: JSON.stringify(ev) });
-      if (r.status === 403){ TOKEN_OK = false; NEED_PASSWORD = true; applyReadOnlyUI(); updateSyncStatus('Нужен пароль — изменения ждут отправки', false); break; }
+      const r = await apiFetch('events', { method:'POST', body: ev });
+      if (r.status === 403){ ROLE = 'viewer'; applyReadOnlyUI(); updateSyncStatus('Нет прав на редактирование', false); outbox = []; saveOutbox(); break; }
+      if (r.status === 400){ outbox.shift(); saveOutbox(); continue; }     // устаревшее событие (вид работ больше не существует)
       if (!r.ok) throw new Error('HTTP ' + r.status);
       outbox.shift(); saveOutbox();
     }
@@ -295,7 +314,7 @@ async function flushOutbox(){
 let activeKsId = null, ksMode = false, ksDragStart = null, ksDragCurrent = null;
 async function loadKsAreas(){
   try {
-    const r = await fetch('api/ks?corpus=' + C.id, {cache:'no-store'});
+    const r = await apiFetch('ks?corpus=' + C.id);
     C.ksAreas = (await r.json()).areas || [];
   } catch(e){ C.ksAreas = []; }
   activeKsId = C.ksAreas.length ? C.ksAreas[0].id : null;
@@ -323,22 +342,22 @@ function computeKsStats(area){
 function renderKsPanel(){
   const list = document.getElementById('ksList'); if (!list || !C) return;
   list.innerHTML = C.ksAreas.map(a=>`
-    <div class="ks-item ${activeKsId===a.id?'active':''}" onclick="selectKsArea('${a.id}')">
+    <div class="ks-item ${activeKsId===a.id?'active':''}" data-ks="${escapeHtml(a.id)}">
       <div style="flex:1">${escapeHtml(a.name)}</div>
-      <span class="del" onclick="event.stopPropagation(); deleteKsArea('${a.id}')">✕</span>
+      <span class="del" data-ks-del="${escapeHtml(a.id)}">✕</span>
     </div>`).join('');
   const statsEl = document.getElementById('ksStats');
   const area = C.ksAreas.find(a=>a.id===activeKsId);
   if (!area){ statsEl.innerHTML = ''; return; }
   statsEl.innerHTML = '<div class="ks-stats-table">' + computeKsStats(area).map(s=>{
     const pct = s.total ? Math.round(s.done/s.total*100) : 0;
-    return `<div class="ks-stats-row"><span class="name">${s.label}</span><span class="val">${s.done}/${s.total} (${pct}%)</span></div>`;
+    return `<div class="ks-stats-row"><span class="name">${escapeHtml(s.label)}</span><span class="val">${s.done}/${s.total} (${pct}%)</span></div>`;
   }).join('') + '</div>';
 }
 window.selectKsArea = function(id){ activeKsId = id; renderKsPanel(); draw(); };
 window.deleteKsArea = async function(id){
   if (!confirm('Удалить этот участок КС?')) return;
-  await fetch('api/ks/' + encodeURIComponent(id), {method:'DELETE', headers: authHeaders()});
+  await apiFetch('ks/' + encodeURIComponent(id), {method:'DELETE'});
   loadKsAreas();
 };
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -349,19 +368,18 @@ function hideLoading(){ document.getElementById('loadingVeil').classList.remove(
 function updateCorpusTabsUI(){
   document.querySelectorAll('.corpus-tab').forEach(el=>el.classList.toggle('active', el.dataset.corpus === activeCorpus));
   const empty = document.getElementById('emptyCorpusMsg');
-  if (empty) empty.style.display = (C && C.geo.panel.length) ? 'none' : 'flex';
+  if (empty) empty.hidden = !!(C && C.geo.panel.length) || !C;
 }
 window.switchCorpus = async function(id, force){
   if ((!force && id === activeCorpus && C) || !CORPUS_LABEL[id]) return;
-  activeCorpus = id; LS.set('ft_active_corpus', id);
+  activeCorpus = id; LS.set('ft_active_corpus_' + SLUG, id);
   updateCorpusTabsUI();
   try { C = await ensureCorpus(id); }
   catch(e){ hideLoading(); updateSyncStatus(e.message, false); return; }
   if (activeCorpus !== id) return;
   hoverFacade = -1;
   fitToBox();
-  const hidden = HIDDEN_WORK_TYPES[activeCorpus];
-  if (hidden && hidden.has(activeWorkType)) activeWorkType = visibleWorkTypes()[0].id;
+  if (!visibleWorkTypes().some(w=>w.id === activeWorkType)) activeWorkType = visibleWorkTypes()[0].id;
   renderWorkTypeList(); updateCorpusTabsUI(); resizeCanvas();
   hideLoading();
   await pullEvents();
@@ -389,7 +407,7 @@ function screenToWorld(sx,sy){
   return [ view.x + sx/rect.width*view.w, view.y + sy/rect.height*view.h ];
 }
 const CAD_FONT = 'ISOCPEUR, "GOST type A", "GOST 2.304", "Arial Narrow", Arial, sans-serif';
-const RED = '#FF3B30';            // как «предъявляемый участок» на исполнительных схемах (ACI 1)
+const RED = '#FF2A2A';            // выполнено — насыщенный красный, как «предъявляемый участок» на исполнительных схемах
 
 /* штриховки ANSI31 (45°) с постоянным шагом на экране */
 const hatchCache = {};
@@ -433,12 +451,13 @@ function updateCoords(){
   el.textContent = 'X ' + f(wx) + '   Y ' + f(-wy) + '   мм';
 }
 function filledPath(id){
-  // путь закрашенных панелей кешируется и пересобирается только когда слой изменился
+  // путь закрашенных элементов кешируется и пересобирается только когда слой изменился
   const key = geoKey(id), c = C.fillCache[id];
-  if (c && c.ver === C.ver[id]) return c.path;
+  if (c && c.ver === C.ver[id]) return c;
   const path = buildPath(C.geo[key], C.layers[id]);
-  C.fillCache[id] = { ver: C.ver[id], path };
-  return path;
+  const sides = key === 'windows' ? C.sidesPath(Array.from(C.layers[id], i=>C.geo.windows[i]).filter(Boolean), id) : null;
+  C.fillCache[id] = { ver: C.ver[id], path, sides };
+  return C.fillCache[id];
 }
 let drawQueued = false, lastFrameMs = 0;
 function draw(){
@@ -451,7 +470,8 @@ function workLayerFor(id){
   if (id === 'brackets') return 'brackets';
   if (id === 'rails') return 'rails';
   if ((id === 'insul1' || id === 'insul2') && C.geo.insulGrid.some(g=>!g.hidden)) return 'insulGrid';
-  if (id === 'akp' || id === 'sfb' || id === 'keramogranit') return id;
+  if (id === 'akp' || id === 'sfb' || id === 'keramogranit' || id === 'reveals' || id === 'flashings') return id;
+  if (id === 'fc_adj' || id === 'fc_box' || id === 'fc_strip') return id;
   return null;
 }
 /* ── кэш отрисовки: статичные слои и закраска рисуются в отдельные холсты и перерисовываются только при
@@ -472,13 +492,18 @@ const HL = {
   brackets:{line:'#4DA3FF', label:'Кронштейны'},
   rails:{line:'#FF5CFF', label:'Направляющие'},
   insulGrid:{line:'#FFD60A', label:'Плиты утеплителя'},
+  reveals:{fill:'rgba(0,229,255,.55)', line:'#00E5FF', label:'Откосы (марки О-…)'},
+  flashings:{fill:'rgba(255,92,255,.6)', line:'#FF5CFF', label:'Отливы (марки ОТ-…)'},
+  fc_adj:{line:'#FFB000', sides:true, label:'Окна: примыкание по 4 сторонам'},
+  fc_box:{line:'#FFB000', sides:true, label:'Окна: короб — верх и боковины'},
+  fc_strip:{line:'#FFB000', sides:true, label:'Окна: нащельники — боковины'},
   grid:{line:'rgba(255,214,10,.65)', label:'Сетка панелей фасада'},
 };
 function hlFor(id){
   const w = workLayerFor(id);
   if (w) return {key:w, ...HL[w]};
   if (id === 'terracotta' || id === 'insul1' || id === 'insul2') return {key:'panel', ...HL.grid};
-  return null;     // отсечка, откосы, отливы — без подсветки, только закраска
+  return null;
 }
 function patKind(p){
   if (!p) return 'diag';
@@ -504,25 +529,47 @@ function drawStatic(g, s, dpr){
   if (hl){
     // издалека тонкие элементы (кронштейны, направляющие) сливаются — делаем их полупрозрачными
     const detail = Math.max(.35, Math.min(1, C.tileMm * s / 10));
-    const path = hl.key === 'panel' ? C.paths.panel : C.paths[hl.key];
-    if (hl.fill){ g.fillStyle = hl.fill; g.fill(path); }
-    g.globalAlpha = hl.fill ? 1 : .85 * detail;
-    g.lineWidth = px(hl.fill ? 1.6 : 1.1); g.strokeStyle = hl.line; g.stroke(path);
-    g.globalAlpha = 1;
+    if (hl.sides){
+      // окна: тонкий контур проёма и яркие стороны, которые входят в этот вид отсечки
+      g.lineWidth = px(1); g.strokeStyle = 'rgba(255,176,0,.35)'; g.stroke(C.paths.windows);
+      g.lineWidth = px(2.2); g.strokeStyle = hl.line; g.stroke(C.sides[hl.key]);
+    } else {
+      const path = hl.key === 'panel' ? C.paths.panel : C.paths[hl.key];
+      if (hl.fill){ g.fillStyle = hl.fill; g.fill(path); }
+      g.globalAlpha = hl.fill ? 1 : .85 * detail;
+      g.lineWidth = px(hl.fill ? 1.6 : 1.1); g.strokeStyle = hl.line; g.stroke(path);
+      g.globalAlpha = 1;
+    }
   }
 }
 function drawPainted(g, s, dpr, subset){
-  const fp = subset ? buildPath(C.geo[geoKey(activeWorkType)], subset) : filledPath(activeWorkType);
+  const key = geoKey(activeWorkType);
+  let fp, sides;
+  if (subset){
+    fp = buildPath(C.geo[key], subset);
+    if (key === 'windows') sides = C.sidesPath(subset.map(i=>C.geo.windows[i]).filter(Boolean), activeWorkType);
+  } else { const c = filledPath(activeWorkType); fp = c.path; sides = c.sides; }
   g.setTransform(dpr*s, 0, 0, dpr*s, -view.x*s*dpr, -view.y*s*dpr);
-  if (C.tileMm * s < 4){
-    // издалека штриховка сливается — показываем выполненное сплошной заливкой того же цвета
-    g.fillStyle = 'rgba(255,59,48,.62)'; g.fill(fp);
-  } else {
-    const hp = hatchPattern(g, RED, 7, 1.2); hp.setTransform(new DOMMatrix().scale(1/(s*dpr)));
-    g.fillStyle = 'rgba(255,59,48,.22)'; g.fill(fp);
-    g.fillStyle = hp; g.fill(fp);                              // выполнено — красная штриховка ANSI31
+  if (key === 'windows'){
+    // окно с выполненной отсечкой: лёгкая красная заливка проёма и толстые красные стороны этого вида работ
+    g.fillStyle = 'rgba(255,42,42,.28)'; g.fill(fp);
+    g.lineWidth = Math.max(3/s, 60); g.strokeStyle = RED; g.lineCap = 'square'; g.stroke(sides);
+    return;
   }
-  if (C.tileMm * s > 5){ g.lineWidth = 1.2/s; g.strokeStyle = 'rgba(255,59,48,.9)'; g.stroke(fp); }   // контуры — только когда панели крупные
+  if (key === 'reveals' || key === 'flashings'){
+    g.fillStyle = RED; g.fill(fp);
+    g.lineWidth = 2.5/s; g.strokeStyle = RED; g.stroke(fp);       // тонкие элементы — с обводкой, чтобы были видны издалека
+    return;
+  }
+  if (C.tileMm * s < 4){
+    // издалека штриховка сливается — показываем выполненное сплошной заливкой
+    g.fillStyle = 'rgba(255,42,42,.85)'; g.fill(fp);
+  } else {
+    const hp = hatchPattern(g, '#FFD0D0', 7, 1.1); hp.setTransform(new DOMMatrix().scale(1/(s*dpr)));
+    g.fillStyle = 'rgba(255,42,42,.66)'; g.fill(fp);           // насыщенная красная заливка
+    g.fillStyle = hp; g.globalAlpha = .55; g.fill(fp); g.globalAlpha = 1;   // и светлая штриховка ANSI31 поверх
+  }
+  if (C.tileMm * s > 5){ g.lineWidth = 1.6/s; g.strokeStyle = '#FF5A5A'; g.stroke(fp); }   // контуры — когда панели крупные
 }
 function drawNow(){
   syncView();
@@ -655,13 +702,15 @@ function facadeBoxes(fi){
   if (x0===Infinity) return [];
   return [{x:x0, y:y0, w:x1-x0, h:y1-y0}];
 }
-function facadeStats(){
-  const geo = geoForType(activeWorkType), filled = C.layers[activeWorkType];
+function facadeStats(id){
+  id = id || activeWorkType;
+  const geo = geoForType(id), filled = C.layers[id];
   const F = C.data.facades || [];
   const st = F.map(()=>({tot:0, done:0})), views = {tot:0, done:0};
   geo.forEach((g, idx)=>{
     if (g.hidden) return;
-    const s = g.fac >= 0 ? st[g.fac] : views; s.tot += g.area; if (filled.has(idx)) s.done += g.area;
+    const s = g.fac >= 0 ? st[g.fac] : views, m = measure(g, id);
+    s.tot += m; if (filled.has(idx)) s.done += m;
   });
   return {st, views};
 }
@@ -674,72 +723,85 @@ function renderVolumes(){
   if (!C || volCollapsed){ return; }
   const F = C.data.facades || [];
   const {st, views} = facadeStats();
-  const clad = CLADDING.has(activeWorkType);
+  const clad = CLADDING.has(activeWorkType), lin = LINEAR.has(activeWorkType);
   let html = '<table class="vol-table"><tr><th>Оси</th><th>' + (clad ? 'По чертежу' : 'Проект') +
-             '</th><th>%</th><th>' + (clad ? 'Закрашено' : '≈ Выполнено') + '</th></tr>';
+             '</th><th>%</th><th>' + (clad || lin ? 'Выполнено' : '≈ Выполнено') + '</th></tr>';
   let sumP = 0, sumD = 0, sumTot = 0, sumDone = 0;
   F.forEach((f, i)=>{
     const s = st[i]; if (!s.tot && !(f.design||{})[activeWorkType]) return;
     const pct = s.tot ? s.done / s.tot : 0;
     let proj, done;
     if (clad){ proj = s.tot/1e6; done = s.done/1e6; }
+    else if (lin){ proj = s.tot; done = s.done; }
     else { proj = (f.design||{})[activeWorkType] || 0; done = proj * pct; }
     sumP += proj; sumD += done; sumTot += s.tot; sumDone += s.done;
-    html += `<tr class="row" onmouseenter="hoverFac(${i})" onmouseleave="hoverFac(-1)" onclick="zoomFac(${i})">
-      <td>${f.name}<div class="vol-bar"><i style="width:${(pct*100).toFixed(1)}%;background:${RED}"></i></div></td>
+    html += `<tr class="row" data-fac="${i}">
+      <td>${escapeHtml(f.name)}<div class="vol-bar"><i style="width:${(pct*100).toFixed(1)}%;background:${RED}"></i></div></td>
       <td>${proj ? fmt(proj) : '—'}</td><td class="pct">${Math.round(pct*100)}%</td><td>${proj ? fmt(done) : '—'}</td></tr>`;
   });
   const pctAll = sumP ? sumD / sumP : (sumTot ? sumDone / sumTot : 0);
   html += `<tr class="total"><td>Итого по осям</td><td>${fmt(sumP)}</td><td>${Math.round(pctAll*100)}%</td><td>${fmt(sumD)}</td></tr></table>`;
   let note = '';
   if (views.tot){
-    note += `<div class="vol-note">Виды, террасы и кровля вне основных фасадов: закрашено <b>${Math.round(views.done/views.tot*100)}%</b>${clad ? ' (' + fmt(views.done/1e6) + ' из ' + fmt(views.tot/1e6) + ' м²)' : ''} — в таблицу не входит.</div>`;
+    const vv = clad ? ' (' + fmt(views.done/1e6) + ' из ' + fmt(views.tot/1e6) + ' м²)' : lin ? ' (' + fmt(views.done) + ' из ' + fmt(views.tot) + ' п.м)' : '';
+    note += `<div class="vol-note">Виды, террасы и кровля вне основных фасадов: выполнено <b>${Math.round(views.done/views.tot*100)}%</b>${vv} — в таблицу не входит.</div>`;
   }
-  const ext = (C.data.designOther || {})[activeWorkType];
+  const ext = lin ? null : (C.data.designOther || {})[activeWorkType];
   if (ext && ext.length){
     note += '<div class="vol-note">Вне осей по проекту: ' + ext.map(e=>`${escapeHtml(e.name)} <b>${fmt(e.value)} ${w.unit}</b>`).join('; ') + '.</div>';
   }
+  if (w.group === 'fc'){
+    // итог по всей противопожарной отсечке: примыкание + короб + нащельники
+    let tp = 0, td = 0;
+    WORK_TYPES.filter(x=>x.group === 'fc').forEach(x=>{ const r = facadeStats(x.id); r.st.forEach(a=>{ tp += a.tot; td += a.done; }); });
+    note += `<div class="vol-note">Итого противопожарная отсечка по осям: <b>${fmt(td)} из ${fmt(tp)} п.м</b> (${tp ? Math.round(td/tp*100) : 0}%). На окно 2×2 м: примыкание 8 + короб 6 + нащельники 4 = 18 п.м.</div>`;
+  }
   note += clad
     ? '<div class="vol-note">Проектный объём облицовки не считался — показана площадь панелей по чертежу, м².</div>'
+    : lin
+    ? (w.group === 'fc'
+        ? '<div class="vol-note">Проект — по проёмам СПК чертежа АР, п.м. Выполнено — по отмеченным окнам.</div>'
+        : '<div class="vol-note">Проект — длины элементов по маркам чертежа АР (без крышек парапетов), п.м. Выполнено — по отмеченным элементам.</div>')
     : `<div class="vol-note">Проект — расчёт по исполнительным схемам (13.10.26), ${w.unit}. ≈ Выполнено = проект × доля закрашенной площади фасада.</div>`;
   document.getElementById('volBody').innerHTML = html + note;
 }
-window.hoverFac = function(i){ hoverFacade = i; draw(); };
-window.zoomFac = function(i){
+function hoverFac(i){ if (hoverFacade !== i){ hoverFacade = i; draw(); } }
+function zoomFac(i){
   const b = facadeBoxes(i)[0]; if (!b) return;
   const pad = Math.max(b.w, b.h) * 0.06;
   fitToBox({x:b.x-pad, y:b.y-pad, w:b.w+pad*2, h:b.h+pad*2}); draw();
-};
+}
 let volTimer = null;
 function renderVolumesSoon(){ clearTimeout(volTimer); volTimer = setTimeout(renderVolumes, 120); }
 
 /* ── легенда видов работ ── */
-const HIDDEN_WORK_TYPES = { corpus1: new Set(['sfb','keramogranit']), corpus2: new Set(['sfb','keramogranit']),
-                            corpus3: new Set(['terracotta']), corpus4: new Set(['terracotta']),
-                            corpus5: new Set(['terracotta','sfb','keramogranit']) };
 function visibleWorkTypes(){
-  const hidden = HIDDEN_WORK_TYPES[activeCorpus];
-  return hidden ? WORK_TYPES.filter(w=>!hidden.has(w.id)) : WORK_TYPES;
+  const hidden = new Set(((PROJECT && PROJECT.hiddenWorkTypes) || {})[activeCorpus] || []);
+  return WORK_TYPES.filter(w=>!hidden.has(w.id));
 }
 function layerPct(id){
   if (!C) return null;
   const geo = geoForType(id), filled = C.layers[id];
   let tot = 0, done = 0;
-  for (let i=0;i<geo.length;i++){ const g = geo[i]; if (g.hidden) continue; tot += g.area; if (filled.has(i)) done += g.area; }
+  for (let i=0;i<geo.length;i++){ const g = geo[i]; if (g.hidden) continue; const m = measure(g, id); tot += m; if (filled.has(i)) done += m; }
   return tot ? done/tot : null;
 }
 function renderWorkTypeList(){
   const el = document.getElementById('workTypeList');
   const sub = document.getElementById('layerSub'), cur = WORK_TYPES.find(x=>x.id===activeWorkType);
-  if (sub) sub.textContent = cur.label;
-  el.innerHTML = '<div class="layer-cols"><span>Вид работ</span><span>Вып.</span></div>' + visibleWorkTypes().map(w=>{
+  if (sub) sub.textContent = cur.group ? GROUPS[cur.group] + ': ' + cur.short : cur.label;
+  let lastGroup = null, html = '<div class="layer-cols"><span>Вид работ</span><span>Вып.</span></div>';
+  visibleWorkTypes().forEach(w=>{
+    if (w.group && w.group !== lastGroup) html += `<div class="layer-group">${escapeHtml(GROUPS[w.group])}</div>`;
+    lastGroup = w.group || null;
     const p = layerPct(w.id);
-    return `<div class="legend-item ${activeWorkType===w.id?'active':''}" onclick="setWorkType('${w.id}')" title="${w.label}">
-      <div>${w.label}</div><div class="lp">${p===null ? '—' : Math.round(p*100)+'%'}</div></div>`;
-  }).join('') + `<div class="legend-block">
-      <div class="lg"><i class="lg-done"></i>Выполнено (предъявляемый участок)</div>
+    html += `<div class="legend-item ${w.group ? 'sub' : ''} ${activeWorkType===w.id?'active':''}" data-wt="${w.id}" title="${escapeHtml(w.label)}">
+      <div>${escapeHtml(w.group ? w.short : w.label)}</div><div class="lp">${p===null ? '—' : Math.round(p*100)+'%'}</div></div>`;
+  });
+  el.innerHTML = html + `<div class="legend-block">
+      <div class="lg"><i class="lg-done"></i>Выполнено</div>
       ${workLegendHtml()}
-      <div class="lg"><i class="lg-ar"></i>Чертёж АР${hlFor(activeWorkType) ? ' (приглушён)' : ''}</div>
+      <div class="lg"><i class="lg-ar"></i>Чертёж АР${C && hlFor(activeWorkType) ? ' (приглушён)' : ''}</div>
       <div class="lg"><i class="lg-axis"></i>Оси</div></div>`;
 }
 function workLegendHtml(){
@@ -747,10 +809,10 @@ function workLegendHtml(){
   if (!hl) return '';
   return `<div class="lg"><i style="border:1.5px solid ${hl.line};background:${hl.fill || 'transparent'}"></i>${escapeHtml(hl.label)}</div>`;
 }
-window.togglePal = function(id){
+function togglePal(id){
   const el = document.getElementById(id); el.classList.toggle('collapsed');
   LS.set('ft_pal_' + id, el.classList.contains('collapsed') ? '1' : '0');
-};
+}
 window.setWorkType = function(id){ activeWorkType = id; renderWorkTypeList(); renderVolumes(); draw(); };
 
 window.setTool = function(t){
@@ -844,7 +906,7 @@ async function pointerUp(){
         const name = prompt('Название участка (например «КС №1 от 15.07»):', 'КС №' + (C.ksAreas.length+1));
         if (name){
           const area = { id:'ks' + Date.now(), corpus:C.id, name, x0, y0, x1, y1 };
-          try { await fetch('api/ks', {method:'POST', headers:authHeaders({'Content-Type':'application/json'}), body:JSON.stringify(area)}); } catch(e){}
+          try { await apiFetch('ks', {method:'POST', body:area}); } catch(e){}
           await loadKsAreas(); activeKsId = area.id; renderKsPanel();
         }
       }
@@ -904,20 +966,64 @@ function showZoomHint(){
   clearTimeout(zoomHintTimer); zoomHintTimer = setTimeout(()=>el.classList.remove('show'), 1800);
 }
 
+/* ── кнопки и списки: обработчики навешиваются здесь (на странице нет встроенных скриптов — так требует политика безопасности) ── */
+function bindUI(){
+  document.addEventListener('click', e=>{
+    const a = e.target.closest('[data-act]');
+    if (a){
+      const act = a.dataset.act;
+      if (act === 'brush') setTool('brush');
+      else if (act === 'eraser') setTool('eraser');
+      else if (act === 'clear') clearLayer();
+      else if (act === 'fit') resetView();
+      else if (act === 'toggle-layers') togglePal('layerPal');
+      else if (act === 'toggle-vol') toggleVolCard();
+      else if (act === 'ks-new') toggleKsMode();
+      return;
+    }
+    const wt = e.target.closest('[data-wt]'); if (wt){ setWorkType(wt.dataset.wt); return; }
+    const tab = e.target.closest('[data-corpus]'); if (tab){ switchCorpus(tab.dataset.corpus); return; }
+    const fr = e.target.closest('tr[data-fac]'); if (fr){ zoomFac(Number(fr.dataset.fac)); return; }
+    const kd = e.target.closest('[data-ks-del]'); if (kd){ deleteKsArea(kd.dataset.ksDel); return; }
+    const ks = e.target.closest('[data-ks]'); if (ks){ selectKsArea(ks.dataset.ks); return; }
+  });
+  const vb = document.getElementById('volBody');
+  vb.addEventListener('mouseover', e=>{ const r = e.target.closest('tr[data-fac]'); hoverFac(r ? Number(r.dataset.fac) : -1); });
+  vb.addEventListener('mouseleave', ()=>hoverFac(-1));
+  document.getElementById('brushRange').addEventListener('input', e=>onBrushSize(e.target.value));
+}
+
 /* ── старт ── */
 (async function init(){
+  bindUI();
+  if (!SLUG){ location.href = '/'; return; }
   try {
-    const cfg = await (await fetch('api/config', {cache:'no-store'})).json();
-    NEED_PASSWORD = !!cfg.editPasswordRequired;
-    if (NEED_PASSWORD && EDIT_TOKEN) TOKEN_OK = await checkToken();
-  } catch(e){ updateSyncStatus('Нет связи с сервером', false); }
+    const r = await apiFetch('info');
+    if (!r.ok){ location.href = '/'; return; }
+    const info = await r.json();
+    PROJECT = info.project; ROLE = PROJECT.role;
+    document.title = (PROJECT.short || PROJECT.name) + ' — Фасады';
+    document.getElementById('projName').textContent = PROJECT.short || PROJECT.name;
+    document.getElementById('projName').title = PROJECT.name;
+    document.getElementById('userChip').textContent = info.user.name || info.user.login;
+  } catch(e){ updateSyncStatus('Нет связи с сервером', false); return; }
+  CORPUS_LABEL = {};
+  const tabs = document.getElementById('corpusTabs'); tabs.replaceChildren();
+  PROJECT.corpora.forEach(c=>{
+    CORPUS_LABEL[c.id] = c.label;
+    const b = document.createElement('button'); b.className = 'corpus-tab'; b.dataset.corpus = c.id; b.textContent = c.label;
+    tabs.append(b);
+  });
+  const saved = LS.get('ft_active_corpus_' + SLUG, '');
+  const first = CORPUS_LABEL[saved] ? saved : (PROJECT.corpora[0] || {}).id;
   if (LS.get('ft_pal_layerPal', isMobileViewport() ? '1' : '0') === '1') document.getElementById('layerPal').classList.add('collapsed');
   applyReadOnlyUI();
   renderVolumes();
   resizeCanvas();
-  await switchCorpus(activeCorpus, true);
+  if (!first){ hideLoading(); return; }
+  await switchCorpus(first, true);
   showZoomHint();
   flushOutbox();
-  setInterval(()=>{ if (!isDrawing){ pullEvents(); flushOutbox(); } }, 4000);
+  setInterval(()=>{ if (!isDrawing && !document.hidden){ pullEvents(); flushOutbox(); } }, 4000);
   document.addEventListener('visibilitychange', ()=>{ if (!document.hidden) pullEvents(); });
 })();

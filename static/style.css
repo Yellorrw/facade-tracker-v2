@@ -21,6 +21,7 @@
 html,body { height:100%; overflow:hidden; }
 body { font:13px/1.35 var(--ui); background:var(--model); color:var(--text); -webkit-font-smoothing:antialiased; }
 button { font:inherit; color:inherit; }
+[hidden] { display:none !important; }
 :focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
 
 /* ── пространство модели ── */
@@ -32,7 +33,10 @@ canvas { display:block; width:100%; height:100%; }
 /* ── лента ── */
 .ribbon { position:fixed; top:0; left:0; right:0; height:var(--ribbon-h); z-index:60; display:flex; align-items:center; gap:4px;
   background:var(--ribbon); border-bottom:1px solid #2A313C; padding:0 8px; }
-.app-name { font-weight:600; font-size:13px; padding:0 12px 0 6px; margin-right:4px; border-right:1px solid var(--line); height:24px; display:flex; align-items:center; white-space:nowrap; }
+.app-name { font-weight:600; font-size:13px; padding:0 12px 0 4px; margin-right:4px; border-right:1px solid var(--line); height:24px; display:flex; align-items:center; gap:6px; white-space:nowrap; color:var(--text); text-decoration:none; }
+.app-name .back { font-size:18px; line-height:1; color:var(--text-dim); margin-top:-2px; }
+.app-name:hover .back { color:var(--text); }
+.user-chip { font-size:12px; color:var(--text-dim); padding-left:10px; border-left:1px solid var(--line); white-space:nowrap; max-width:180px; overflow:hidden; text-overflow:ellipsis; }
 .rb-group { display:flex; align-items:center; gap:2px; padding:0 6px; border-right:1px solid var(--line); height:30px; }
 .rb-btn { display:inline-flex; align-items:center; gap:6px; height:30px; padding:0 10px; border:1px solid transparent; border-radius:3px;
   background:none; cursor:pointer; white-space:nowrap; font-size:12.5px; }
@@ -57,7 +61,8 @@ canvas { display:block; width:100%; height:100%; }
 .pal-right { top:calc(var(--ribbon-h) + 10px); right:10px; width:348px; max-height:calc(100vh - var(--ribbon-h) - var(--status-h) - 20px); }
 .pal-head { display:flex; align-items:center; gap:8px; height:28px; padding:0 10px; background:var(--pal-head); border-bottom:1px solid var(--line-soft);
   font-size:12px; font-weight:600; cursor:pointer; user-select:none; flex-shrink:0; }
-.pal-sub { font-weight:400; color:var(--text-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pal-head > span:first-child { white-space:nowrap; }
+.pal-sub { min-width:0; font-weight:400; color:var(--text-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .pal-head .chev { margin-left:auto; color:var(--text-mute); font-size:11px; transition:transform .15s; }
 .palette.collapsed .chev { transform:rotate(-90deg); }
 .palette.collapsed .pal-body { display:none; }
@@ -74,6 +79,8 @@ canvas { display:block; width:100%; height:100%; }
 .legend-swatch { width:14px; height:14px; border-radius:2px; border:1px solid rgba(255,255,255,.35); }
 .legend-item .lp { font-family:var(--mono); font-size:11.5px; color:var(--text-dim); }
 .legend-item.active .lp { color:var(--text); }
+.layer-group { padding:8px 10px 3px; font-size:11px; color:var(--text-mute); text-transform:uppercase; letter-spacing:.5px; }
+.legend-item.sub { padding-left:22px; }
 
 /* объёмы по осям — как палитра свойств */
 .vol-table { width:100%; border-collapse:collapse; font-size:12px; }
@@ -129,6 +136,7 @@ canvas { display:block; width:100%; height:100%; }
   .pal-right { top:auto; bottom:calc(var(--status-h) + 10px); left:10px; width:auto; max-height:40vh; }
   .sb-hint { display:none; }
   .sb-coords { display:none; }
+  .user-chip { display:none; }
   .corpus-tab { padding:0 12px; }
 }
 @media (min-width:821px) and (max-width:1180px) { .pal-right { width:300px; } .rb-btn span.lbl { display:none; } .app-name { display:none; } }
@@ -137,7 +145,7 @@ canvas { display:block; width:100%; height:100%; }
 .legend-block { border-top:1px solid var(--line-soft); padding:8px 10px 10px; display:grid; gap:6px; }
 .lg { display:flex; align-items:center; gap:10px; font-size:11.5px; color:var(--text-dim); }
 .lg i { width:26px; height:14px; flex-shrink:0; display:inline-block; }
-.lg-done { background:repeating-linear-gradient(135deg, #FF3B30 0 1.2px, rgba(255,59,48,.10) 1.2px 6px); border:1px solid #FF3B30; }
+.lg-done { background:repeating-linear-gradient(135deg, rgba(255,208,208,.6) 0 1.1px, rgba(255,42,42,.72) 1.1px 6px); border:1.5px solid #FF5A5A; }
 .lg-mono { background:repeating-linear-gradient(135deg, rgba(200,206,214,.45) 0 1px, transparent 1px 5px); border:1px solid rgba(255,255,255,.85); }
 .lg-work { border:1px solid rgba(232,236,242,.62); background:linear-gradient(90deg, transparent 48%, rgba(232,236,242,.5) 48% 52%, transparent 52%); }
 .lg-axis { height:1px !important; border-top:1px dashed #FF5252; }
