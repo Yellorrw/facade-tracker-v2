@@ -52,6 +52,15 @@ cat > "$CADDYFILE" <<CF
 {
 	email admin@$DOMAIN
 	admin off
+	default_bind 127.0.0.1
+	servers {
+		listener_wrappers {
+			proxy_protocol {
+				allow 127.0.0.1/32
+			}
+			tls
+		}
+	}
 }
 $DOMAIN {
 	encode zstd gzip
@@ -83,7 +92,7 @@ echo "== Нужен пароль администратора Mac"
 ANCHOR=/etc/pf.anchors/ru.fasady
 sudo tee "$ANCHOR" >/dev/null <<PF
 # Фасады: входящие соединения к сайту пропускаем и отвечаем через домашний роутер, даже если включён VPN
-pass in quick on $IFACE reply-to ($IFACE $GW) inet proto tcp from any to $LANIP port { 80, 443 } keep state
+pass in quick on $IFACE inet proto tcp from any to $LANIP port { 80, 443 } keep state
 pass out quick on $IFACE inet proto tcp from $LANIP port { 80, 443 } to any keep state
 PF
 APPLY=/usr/local/libexec/ru.fasady.pf.sh
@@ -116,6 +125,24 @@ sudo "$APPLY"
 sudo launchctl bootstrap system "$PFPLIST" 2>/dev/null || true
 echo "Правила pf:"; sudo /sbin/pfctl -a com.apple/ru.fasady -s rules 2>/dev/null; sudo /sbin/pfctl -a amn/999.allowFasady -s rules 2>/dev/null || true
 
+# ── 3б. входная точка: relay.py слушает 80/443 на домашнем интерфейсе (ответы — через роутер, не через VPN)
+#        и передаёт соединения в Caddy на 127.0.0.1 ──
+RPLIST=/Library/LaunchDaemons/ru.fasady.relay.plist
+sudo tee "$RPLIST" >/dev/null <<PL
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>ru.fasady.relay</string>
+  <key>ProgramArguments</key><array><string>/usr/bin/python3</string><string>$APP/relay.py</string><string>$LANIP</string><string>$IFACE</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>$APP/logs/relay.log</string>
+  <key>StandardErrorPath</key><string>$APP/logs/relay.log</string>
+</dict></plist>
+PL
+sudo chmod 644 "$RPLIST"
+
 # ── 4. Caddy службой: стартует сам при включении мака, без входа в систему ──
 CPLIST=/Library/LaunchDaemons/ru.fasady.caddy.plist
 sudo tee "$CPLIST" >/dev/null <<PL
@@ -138,6 +165,9 @@ PL
 sudo chmod 644 "$CPLIST"
 sudo launchctl bootout system "$CPLIST" 2>/dev/null || true
 sudo launchctl bootstrap system "$CPLIST"
+sleep 2
+sudo launchctl bootout system "$RPLIST" 2>/dev/null || true
+sudo launchctl bootstrap system "$RPLIST"
 echo
 echo "Жду сертификат (до минуты)…"
 for i in $(seq 1 12); do
