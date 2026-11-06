@@ -92,8 +92,11 @@ echo "== Нужен пароль администратора Mac"
 ANCHOR=/etc/pf.anchors/ru.fasady
 sudo tee "$ANCHOR" >/dev/null <<PF
 # Фасады: входящие соединения к сайту пропускаем и отвечаем через домашний роутер, даже если включён VPN
+table <fasady_local> const { 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 }
 pass in quick on $IFACE inet proto tcp from any to $LANIP port { 80, 443 } keep state
 pass out quick on $IFACE inet proto tcp from $LANIP port { 80, 443 } to any keep state
+# ответ посетителю, который система по маршруту отправила в VPN (utun…), разворачиваем на домашний роутер
+pass out quick on ! $IFACE route-to ($IFACE $GW) inet proto tcp from $LANIP port { 80, 443 } to ! <fasady_local> keep state
 PF
 APPLY=/usr/local/libexec/ru.fasady.pf.sh
 sudo mkdir -p /usr/local/libexec
