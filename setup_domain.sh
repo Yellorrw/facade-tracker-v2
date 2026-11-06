@@ -74,29 +74,47 @@ CF
 "$CADDY" validate --config "$CADDYFILE" --adapter caddyfile >/dev/null 2>&1 || "$CADDY" validate --config "$CADDYFILE" --adapter caddyfile
 echo "Caddyfile: $CADDYFILE"
 
-# ── 3. правило pf: ответы на входящие 80/443 — через домашний интернет, мимо VPN ──
+# ── 3. правило pf: входящие 80/443 пропускаем и отвечаем через домашний интернет, мимо VPN ──
+# В AmneziaVPN включена защита от утечек (kill switch): её правила лежат в якоре «amn» и проверяются
+# после системных, поэтому наше правило кладём и в com.apple, и в конец «amn» (amn/999…) — так оно
+# срабатывает последним и не перебивается блокировкой. Служба переустанавливает правила раз в минуту:
+# Amnezia пересоздаёт свои правила при каждом переподключении.
 echo "== Нужен пароль администратора Mac"
 ANCHOR=/etc/pf.anchors/ru.fasady
 sudo tee "$ANCHOR" >/dev/null <<PF
-# Фасады: входящие соединения к сайту отвечаем через домашний роутер, даже если включён VPN
+# Фасады: входящие соединения к сайту пропускаем и отвечаем через домашний роутер, даже если включён VPN
 pass in quick on $IFACE reply-to ($IFACE $GW) inet proto tcp from any to $LANIP port { 80, 443 } keep state
+pass out quick on $IFACE inet proto tcp from $LANIP port { 80, 443 } to any keep state
 PF
+APPLY=/usr/local/libexec/ru.fasady.pf.sh
+sudo mkdir -p /usr/local/libexec
+sudo tee "$APPLY" >/dev/null <<SH
+#!/bin/sh
+/sbin/pfctl -E >/dev/null 2>&1
+/sbin/pfctl -q -a com.apple/ru.fasady -f $ANCHOR 2>/dev/null
+# якорь Amnezia есть только при включённом VPN с защитой от утечек
+if /sbin/pfctl -s Anchors 2>/dev/null | grep -qx '  amn'; then
+  /sbin/pfctl -q -a amn/999.allowFasady -f $ANCHOR 2>/dev/null
+fi
+exit 0
+SH
+sudo chmod 755 "$APPLY"
 PFPLIST=/Library/LaunchDaemons/ru.fasady.pf.plist
 sudo tee "$PFPLIST" >/dev/null <<PL
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>Label</key><string>ru.fasady.pf</string>
-  <key>ProgramArguments</key><array><string>/bin/sh</string><string>-c</string>
-    <string>sleep 20; /sbin/pfctl -E; /sbin/pfctl -a com.apple/ru.fasady -f $ANCHOR</string></array>
+  <key>ProgramArguments</key><array><string>$APPLY</string></array>
   <key>RunAtLoad</key><true/>
+  <key>StartInterval</key><integer>60</integer>
 </dict></plist>
 PL
+sudo chmod 644 "$PFPLIST"
 sudo launchctl bootout system "$PFPLIST" 2>/dev/null || true
-sudo /sbin/pfctl -E 2>/dev/null || true
-sudo /sbin/pfctl -a com.apple/ru.fasady -f "$ANCHOR"
+sudo "$APPLY"
 sudo launchctl bootstrap system "$PFPLIST" 2>/dev/null || true
-echo "Правило pf загружено:"; sudo /sbin/pfctl -a com.apple/ru.fasady -s rules
+echo "Правила pf:"; sudo /sbin/pfctl -a com.apple/ru.fasady -s rules 2>/dev/null; sudo /sbin/pfctl -a amn/999.allowFasady -s rules 2>/dev/null || true
 
 # ── 4. Caddy службой: стартует сам при включении мака, без входа в систему ──
 CPLIST=/Library/LaunchDaemons/ru.fasady.caddy.plist
