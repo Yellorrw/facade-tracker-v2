@@ -161,9 +161,18 @@ async function ensureCorpus(id){
     }
     return new Path2D(parts.join(''));
   };
+  // основа фасада для кронштейнов, утеплителя и направляющих: сетка панелей + облицовка (АКП, СФБ, керамогранит)
+  // там, где сетки нет. Панели сетки идут первыми с прежними номерами — уже накрашенное не сдвигается.
+  const panelIdx = buildIndex(geo.panel);
+  const coveredByPanel = g=>{
+    const cx = (g.bx0+g.bx1)/2, cy = (g.by0+g.by1)/2, l = panelIdx.get(Math.floor(cx/CELL)*100003 + Math.floor(cy/CELL)) || [];
+    return l.some(i=>{ const p = geo.panel[i]; return cx >= p.bx0 && cx <= p.bx1 && cy >= p.by0 && cy <= p.by1; });
+  };
+  geo.base = geo.panel.slice();
+  for (const k of ['akp','sfb','keramogranit']) for (const g of geo[k]) if (!g.hidden && !coveredByPanel(g)) geo.base.push(g);
   // статичные слои — один Path2D на слой (рисуется одним вызовом вместо тысяч)
   const paths = {}; for (const k in geo) paths[k] = buildPath(geo[k]);
-  const index = {}; for (const k of ['panel','akp','sfb','keramogranit','windows','reveals','flashings']) index[k] = buildIndex(geo[k]);
+  const index = {}; for (const k of ['panel','base','akp','sfb','keramogranit','windows','reveals','flashings']) index[k] = k === 'panel' ? panelIdx : buildIndex(geo[k]);
   const sides = {}; for (const t of ['fc_adj','fc_box','fc_strip']) sides[t] = sidesPath(geo.windows, t);
   const ws = geo.panel.filter(g=>!g.hidden).map(g=>g.bx1-g.bx0).sort((a,b)=>a-b);
   const tileMm = ws.length ? ws[Math.floor(ws.length/2)] : 1000;
@@ -207,7 +216,8 @@ function touchLayer(corp, id, addedIdx){
 function geoKey(id){
   if (id==='akp'||id==='sfb'||id==='keramogranit'||id==='reveals'||id==='flashings') return id;
   if (id==='fc_adj'||id==='fc_box'||id==='fc_strip') return 'windows';
-  return 'panel';                       // остальные виды красятся по общей сетке панелей фасада
+  if (id==='brackets'||id==='insul1'||id==='insul2'||id==='rails') return 'base';   // подсистема — везде, где есть облицовка
+  return 'panel';                       // терракота — по сетке панелей
 }
 function geoForType(id){ return C.geo[geoKey(id)]; }
 /* «вес» элемента в объёме: м² для панелей, п.м для окон, откосов и отливов */
@@ -502,7 +512,8 @@ const HL = {
 function hlFor(id){
   const w = workLayerFor(id);
   if (w) return {key:w, ...HL[w]};
-  if (id === 'terracotta' || id === 'insul1' || id === 'insul2') return {key:'panel', ...HL.grid};
+  if (id === 'terracotta') return {key:'panel', ...HL.grid};
+  if (id === 'insul1' || id === 'insul2') return {key:'base', ...HL.grid};
   return null;
 }
 function patKind(p){
