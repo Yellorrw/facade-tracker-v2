@@ -170,6 +170,8 @@ async function ensureCorpus(id){
   };
   geo.base = geo.panel.slice();
   for (const k of ['akp','sfb','keramogranit']) for (const g of geo[k]) if (!g.hidden && !coveredByPanel(g)) geo.base.push(g);
+  // участки без облицовки в геометрии (монолит над проёмами, плитка, нарисованная в АР заливкой, зоны кронштейнов) — ячейки 0,6×0,6 м
+  if (d.baseExtra) for (const g of buildGeoFlat(d.baseExtra, d.baseExtraFac)) geo.base.push(g);
   // статичные слои — один Path2D на слой (рисуется одним вызовом вместо тысяч)
   const paths = {}; for (const k in geo) paths[k] = buildPath(geo[k]);
   const index = {}; for (const k of ['panel','base','akp','sfb','keramogranit','windows','reveals','flashings']) index[k] = k === 'panel' ? panelIdx : buildIndex(geo[k]);
